@@ -1,0 +1,996 @@
+var e=`<!-- Copyright (c) 2026 whizBANG Developers LLC. All rights reserved. -->
+<!-- Licensed under AGPL-3.0 (Free) or BSL-1.1 (Solo/Team/Fabrick) with AI Training Restriction. See LICENSE. -->
+
+# Weaver Administration Guide
+
+This guide is for the person who installed Weaver and operates it day-to-day. It covers initial setup, user management, license configuration, workload provisioning, security administration, and ongoing maintenance.
+
+**Prerequisites:** Weaver is installed and running on NixOS. If you have not yet installed Weaver, see [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md) for NixOS module installation instructions.
+
+## Table of Contents
+
+- [First-Run Setup](#first-run-setup)
+- [User Management](#user-management)
+- [License & Tier Management](#license--tier-management)
+- [Network Management](#network-management)
+- [AI Agent Configuration](#ai-agent-configuration)
+- [Workload Management](#workload-management)
+- [Tags & Organization](#tags--organization)
+- [Audit Log](#audit-log)
+- [Notifications](#notifications)
+- [Organization Settings](#organization-settings)
+- [Security Administration](#security-administration)
+- [Backup & Restore](#backup--restore)
+- [Monitoring & Health](#monitoring--health)
+- [Upgrade Procedures](#upgrade-procedures)
+- [Extensions](#extensions)
+- [Weaver Team Administration](#weaver-team-administration)
+- [Fabrick Administration](#fabrick-administration)
+- [TUI Administration](#tui-administration)
+
+---
+
+## First-Run Setup
+
+*Available: v1.0+*
+
+When Weaver starts for the first time with no existing user accounts, the login page automatically switches to a "Create Admin Account" form. The first account created always receives admin privileges.
+
+### Steps
+
+1. Open your browser and navigate to \`http://<host>:3100\` (default port). The port is configured via \`services.weaver.port\` in the NixOS module. See [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md) for configuration options.
+2. The login page displays a "Create Admin Account" form when no users exist.
+3. Enter a username (lowercase, starts with a letter, 3+ characters) and password (14+ characters, must include uppercase, lowercase, digit, and special character, and must not contain your username).
+4. Select a sector (used to personalise the experience; stored locally only).
+5. Click the **Terms of Service** link, scroll to the bottom of the document, then click **I Agree**. The acceptance checkbox unlocks once you have read to the end.
+6. Click **Create Admin Account**. You are logged in as the admin.
+
+### Verifying the Installation
+
+After first login, confirm:
+
+- The Weaver page loads and shows the host information strip (hostname, IP, CPU cores, RAM, KVM status).
+- Any existing VMs on the host are discovered and displayed.
+- The WebSocket connection is active (VM status updates in real time without page refresh).
+- The health endpoint responds: \`curl -s http://localhost:3100/api/health | jq .\`
+
+#### Check System Health (Solo+)
+
+Open **Settings → Host Information** and expand the **System Health** section. The doctor runs pre-flight checks on KVM, IOMMU, RAM, disk, and kernel modules. All checks should be green for a fully capable host.
+
+Common warning to address after install:
+
+- **IOMMU: Not detected** — Required only for GPU passthrough. If you plan to use GPU workloads, see [System Health Checks](#system-health-checks-doctor) for the full enablement steps. Key point: after adding the kernel parameter, a **reboot is required** — \`nixos-rebuild switch\` alone is not sufficient.
+
+#### Weaver Solo+ — Auto-Provisioning
+
+With a Solo or higher license and provisioning enabled, a lightweight CirrOS example VM (~20 MB) is auto-provisioned after your first admin login. Look for "example-cirros" on the Weaver page — it should appear and transition to "running" status within a few seconds.
+
+**Removing the example VM:** Once you have your own workloads registered or created, \`example-cirros\` is safe to delete. Click the VM card on the Weaver page, then click **Delete** in the detail panel. A hint banner will appear on the dashboard prompting you to remove it once it detects both the example and your own VMs. The example is not automatically recreated — deletion is permanent.
+
+> **Note:** If you configured \`initialAdminPasswordFile\` in the NixOS module, the admin account is created automatically on first startup. You can log in immediately with the username \`admin\` and the password from that file. Change the password via the UI after first login.
+
+---
+
+## User Management
+
+*Available: v1.0+*
+
+*User management (Solo+):* The admin creates and manages user accounts from the Users page in the sidebar. Free tier is single-admin — upgrade to Solo or higher for multi-user access.
+
+| Tier | User capacity |
+|------|--------------|
+| Free | 1 admin (single user) |
+| Solo | 1 admin + additional Operators and Viewers |
+| Team | Per-user licensing — 4 paying users + 1 viewer |
+| Fabrick | Unlimited users |
+
+### Roles
+
+| Role | Permissions |
+|------|------------|
+| **Admin** | Full access: manage users, delete VMs, manage distributions, configure settings, view audit log |
+| **Operator** | Start/stop/restart VMs, register new VMs, refresh distro catalog, use AI diagnostics |
+| **Viewer** | Read-only access to the Weaver page, network map, and AI diagnostics |
+| **Auditor** *(v1.2+)* | Read-only access plus audit log viewing; cannot modify workloads or users |
+
+The dashboard hides actions you do not have permission to perform. Viewers do not see Start/Stop/Restart, Create VM, or Delete buttons. Operators do not see the Delete button.
+
+### Creating Users
+
+1. Navigate to Users from the sidebar.
+2. Click "Add User" in the top-right corner.
+3. Enter a username (lowercase, starts with a letter), password (14+ characters with uppercase, lowercase, digit, and special character; must not contain the username), and select a role.
+4. Click "Create User".
+
+### Changing Roles
+
+Select a new role from the dropdown in the user's row. The change takes effect immediately. The affected user's active sessions are invalidated, requiring them to log in again.
+
+### Deleting Users
+
+Click the trash icon next to the user. You cannot delete your own account.
+
+### User Limits (Weaver Team)
+
+Weaver Team supports up to 4 paying users (Admin/Operator) plus 1 free Viewer seat. A banner appears when the limit is reached. Upgrade to Fabrick for unlimited users.
+
+### Per-VM Access Control (Fabrick)
+
+On Fabrick tier, admins can restrict which VMs each user can access. Click the shield icon next to a non-admin user to assign specific VMs. Users with ACL entries only see and interact with their assigned VMs. Leave the list empty for unrestricted access. Admin users always bypass ACL restrictions.
+
+### Resource Quotas (Fabrick)
+
+On Fabrick tier, admins can set per-user limits on maximum VMs, total memory (MB), and total vCPUs. When a quota is configured, the Create VM dialog shows current usage. VM creation is blocked when any quota limit would be exceeded. Quotas default to unlimited until explicitly set.
+
+---
+
+## License & Tier Management
+
+*Available: v1.0+*
+
+Weaver works out of the box on the Free tier — no license key required. To unlock additional capabilities, activate a license key in the NixOS module configuration.
+
+| Tier | What it unlocks |
+|------|----------------|
+| **Free** | Workload monitoring, start/stop/restart, AI diagnostics (BYOK), network topology, serial console, TUI |
+| **Weaver Solo** | Live Provisioning — create and manage workloads from the browser. Managed bridges, push notifications, distro management |
+| **Weaver Team** | Multi-user with per-user licensing. Full remote management of up to 2 peer hosts |
+| **Fabrick** | Fleet-scale governance — per-workload access control, resource quotas, audit log, fleet topology |
+
+### Activating a License
+
+Set \`licenseKeyFile\` in the NixOS module, pointing to a file containing your license key. Use sops-nix to encrypt the key at rest (see [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md) § Secrets Management).
+
+\`\`\`nix
+services.weaver = {
+  licenseKeyFile = config.sops.secrets."weaver/license-key".path;
+};
+\`\`\`
+
+### Checking Your Current Tier
+
+The Settings page displays your current tier badge and expiry information. You can also check via the command line:
+
+\`\`\`bash
+curl -s http://localhost:3100/api/health | jq '.tier'
+\`\`\`
+
+### License Expiry
+
+After expiry, tier features remain accessible in read-only mode for a 30-day grace period. A warning banner appears in Settings. After the grace period, the instance reverts to the Free tier.
+
+> **Note:** Tier restrictions are enforced at the API level, not just the UI. The TUI and direct API calls respect the same tier gates.
+
+---
+
+## Network Management
+
+*Available: v1.0+ (basic), v1.2+ (full management)*
+
+### Strands — Local Topology
+
+The Strands page (sidebar: "Strands") displays an interactive graph of your host, network bridges, and VMs/containers. Bridges are derived automatically from running workloads. Click a workload node to see its details; double-click to navigate to its detail page.
+
+Strands is read-only on Weaver Free and interactive (drag, zoom, search) on all tiers.
+
+### Bridge Management (v1.2+, Weaver Solo)
+
+Bridges are auto-detected from the network interfaces your VMs are attached to. These appear with an "auto-detected" badge and are read-only. With Weaver Solo or higher, you can also:
+
+- **Create managed bridges** — Click "Create Bridge" to define a new bridge with a name and gateway IP. Managed bridges support deletion and full configuration.
+- **Configure IP pools** — Set IP address pools per bridge for automatic VM IP assignment.
+- **Manage firewall rules** — View and manage nftables firewall rules per bridge (v1.2+).
+
+### Default Bridge Configuration
+
+The default bridge is \`br-microvm\` with gateway \`10.10.0.1\`. Customize in the NixOS module:
+
+\`\`\`nix
+services.weaver = {
+  bridgeInterface = "br-microvm";
+  bridgeGateway = "10.10.0.1";
+};
+\`\`\`
+
+---
+
+## Container Runtimes
+
+*Available: v1.1+*
+
+Declare which container runtimes Weaver may scan and manage. **The default is empty**
+— Weaver manages MicroVMs only until you list something here:
+
+\`\`\`nix
+services.weaver.containerRuntimes = [ "docker" "podman" ];   # or "apptainer"
+\`\`\`
+
+Each declared runtime puts its package on the service's PATH and exports the binary
+path (\`DOCKER_BIN\`, \`PODMAN_BIN\`, \`APPTAINER_BIN\`) to Weaver. Runtimes you do **not**
+declare are not scanned and their binaries are not pulled onto the host — so declaring
+one you have not installed costs you a closure to serve a scan that finds nothing.
+
+Override a binary path only if you need a specific build:
+
+\`\`\`nix
+services.weaver.apptainerBin = "\${pkgs.apptainer}/bin/apptainer";
+\`\`\`
+
+> **A systemd unit gets a minimal PATH.** A runtime on your login shell's PATH is
+> still invisible to the service. Declaring it here is what makes Weaver able to see
+> it — that is the point of the option, not a convenience.
+
+Apptainer is a Weaver Solo feature and is hidden on Free (WVR-206 (Apptainer stays at
+v1.1.0 — Solo-gated, hidden on Free)). Declaring it on a Free install is harmless but
+has no effect.
+
+---
+
+## AI Agent Configuration
+
+*Available: v1.0+*
+
+Weaver includes AI-powered workload diagnostics with three actions per VM: Diagnose (analyze issues), Explain (describe configuration), and Suggest (recommend optimizations).
+
+### Mock Mode
+
+When no API key is configured (server-side or BYOK), AI features use mock mode with canned sample responses. This is ideal for evaluation — no configuration required.
+
+### BYOK (Bring Your Own Key)
+
+Any user can configure their own Anthropic API key in Settings under "AI Provider (BYOK)":
+
+1. Go to Settings.
+2. In the "AI Provider (BYOK)" section, select a vendor and enter your API key.
+3. The key is stored in your browser's localStorage only — never sent to or stored on the server.
+
+Supported vendors include Anthropic (Claude), OpenAI, and self-hosted options (vLLM, TGI, Ollama).
+
+### Server-Side AI Key (Weaver Solo+)
+
+Admins can configure a server-side API key available to all Weaver Solo/Team and Fabrick users:
+
+**NixOS module:** Set \`aiApiKey\` or \`aiApiKeyFile\` in the module configuration.
+
+**Environment variable:** Set \`ANTHROPIC_API_KEY\` in the service environment.
+
+Users on Weaver Solo+ can toggle between their personal BYOK key and the server-provided key in Settings.
+
+### Per-Workload AI Assignment (Fabrick)
+
+On Fabrick tier, admins can override the AI provider for specific workloads in Settings under "Workload AI Assignment". This is useful for HIPAA-sensitive VMs (route to ZenCoder) or air-gapped environments (route to local LLM).
+
+### AI Credential Vault (v1.4+)
+
+*Available: v1.4+*
+
+Admin-managed credential vault for AI provider keys. Centralizes key management so individual users do not need to manage their own API keys.
+
+### Rate Limits
+
+AI agent rate limits are enforced per-user:
+
+| Tier | Limit |
+|------|-------|
+| Free | 5 requests/minute |
+| Weaver Solo/Team | 10 requests/minute |
+| Fabrick | 30 requests/minute |
+
+---
+
+## Workload Management
+
+### Two Approaches to MicroVMs
+
+Weaver supports two ways to run MicroVMs, and they complement each other:
+
+| | NixOS-Declared (All Tiers) | Live Provisioned (Weaver Solo+) |
+|---|---|---|
+| **How** | Define in NixOS flake → \`nixos-rebuild switch\` | Create from Weaver UI or API — no rebuild |
+| **Guest OS** | NixOS only | Any (Ubuntu, Fedora, Windows, Alpine, Arch, custom) |
+| **Hypervisors** | QEMU, Cloud Hypervisor, crosvm, kvmtool | QEMU |
+| **Managed by** | systemd (\`microvm@<name>.service\`) | Weaver process manager |
+| **Shared filesystems** | virtiofs / 9p | Not available |
+| **Guest configuration** | Declarative Nix (version-controlled, atomic rollback) | Cloud-init or manual (ISO install) |
+| **Terminal required** | Yes | No |
+
+**Free tier** users define MicroVMs in their NixOS configuration and use Weaver to monitor, start, stop, and restart them. This path offers lighter hypervisors, shared filesystems, and full declarative reproducibility.
+
+> **Free-tier cap (v1.0.2+):** Weaver Free controls the **alphabetical-first 10 workloads** and a **64 GB total-running-memory** ceiling. Additional workloads remain visible but are read-only ("observer pattern") — start/restart actions return 403 with an upgrade-nag message; stop stays allowed so you can shut down any running workload. The cap is enforced at the backend API, so the TUI and any other client see the same behavior. Paid tiers (Solo/Team/Fabrick) have no cap. See \`backend/src/constants/tier-limits.ts\` for the exact numbers.
+
+**Weaver Solo+** unlocks Live Provisioning — create and manage MicroVMs directly from the browser with any guest OS, no terminal needed. This is the core paid differentiator.
+
+### Running Prebuilt Binaries on the Host — nix-ld (All Tiers)
+
+*Available: v1.1+*
+
+A binary you download — a vendor SDK, a CUDA toolkit, a language server, an editor's remote agent —
+has \`/lib64/ld-linux-x86-64.so.2\` written into its ELF header. NixOS does not put a loader there,
+so the binary cannot start.
+
+Modern NixOS already makes this legible: it installs a stub at that path whose only job is to fail
+with an explanation and a link to \`nix.dev/permalink/stub-ld\`. Weaver goes one step further and
+makes the binary actually run, on by default:
+
+\`\`\`nix
+services.weaver.nixLd.enable = true;   # default
+\`\`\`
+
+Set it to \`false\` to keep the stub — a reasonable choice if you would rather a stray prebuilt
+binary fail loudly than silently work.
+
+When something still reports a missing \`.so\`, name the package that provides it rather than
+turning the feature off. \`ldd <binary>\` says which one:
+
+\`\`\`nix
+services.weaver.nixLd.libraries = with pkgs; [ icu libGL ];
+\`\`\`
+
+That list is **additive**. NixOS already supplies a base set — libstdc++, zlib, openssl, curl,
+zstd, xz, bzip2, libxml2, libssh, libsodium, attr, acl, util-linux, systemd — so restating any of
+those adds nothing.
+
+### Per-User Environments Inside a VM — Home Manager (All Tiers)
+
+*Available: v1.1+*
+
+**Weaver does not manage Home Manager, and that is the point.** It is a guest-internal concern, so
+what follows is a pattern to apply inside your NixOS-declared MicroVMs, not a Weaver feature with
+a button.
+
+The problem it solves is governance. On a shared research or build VM, the administrator owns the
+system — kernel, packages, users, security policy — while each user wants their own shell, editor,
+and dotfiles. Without a split, every personal preference becomes a ticket against the system
+config, and administrators end up either saying no to everything or handing out root.
+
+Home Manager draws the line at the user boundary: the administrator keeps \`configuration.nix\`, and
+each user declares their own environment underneath it, with no ability to alter the system.
+
+\`\`\`nix
+# inside the MicroVM's own NixOS configuration
+{ inputs, ... }:
+{
+  imports = [ inputs.home-manager.nixosModules.home-manager ];
+
+  home-manager.users.researcher = { pkgs, ... }: {
+    home.stateVersion = "25.11";
+    home.packages = with pkgs; [ ripgrep jq python3 ];
+    programs.git = { enable = true; userName = "Researcher"; };
+    programs.neovim.enable = true;
+  };
+}
+\`\`\`
+
+Rebuild the guest and the user's environment is there — reproducible, version-controlled, and
+rollback-able with the same guarantees as the system config.
+
+Two things worth knowing before you commit to it:
+
+- **It applies to NixOS-declared MicroVMs only.** A Live-Provisioned Ubuntu or Windows guest has no
+  Nix evaluation to hook into; there, per-user setup is whatever that distribution provides.
+- **\`home.stateVersion\` is per user and does not track the system's.** Leaving it out is an error;
+  bumping it casually is how a user's config silently changes behaviour on the next rebuild.
+
+### Discovering Existing Workloads (All Tiers)
+
+*Available: v1.0+*
+
+Weaver automatically discovers NixOS-declared MicroVMs and containers running on your host. Two methods:
+
+- **Scan for Workloads** — Discovers \`microvm@*\` systemd services and Docker/Podman containers, then adds them to Weaver. Available from the Weaver page or Settings.
+- **Register Existing** — Manually register a workload that Weaver didn't auto-discover. For workloads managed outside Weaver that you want to monitor.
+
+Once discovered, you can monitor, start, stop, and restart workloads from the Weaver page.
+
+### Live Provisioning (Weaver Solo+)
+
+*Available: Weaver Solo+*
+
+Live Provisioning lets you create and manage MicroVMs directly from the browser — no terminal, no \`nixos-rebuild switch\`, no configuration files. Choose a distribution, set resources, and provision in seconds.
+
+#### Supported Distributions
+
+Built-in distributions include Arch Linux, Fedora, Ubuntu, Debian, Alpine, and CirrOS. Custom distributions can be added in Settings.
+
+- **Cloud distros** — QEMU with cloud images and cloud-init (Ubuntu, Fedora, etc.)
+- **ISO distros** — boot from a downloaded ISO for manual installation (Windows, non-cloud Linux)
+- **NixOS guests** — flake generator with microvm.nix
+
+#### Hypervisor Options
+
+| Hypervisor | Compatibility | Notes |
+|-----------|---------------|-------|
+| QEMU | All distributions | Most versatile; supports desktop mode (VNC), Windows, cloud images |
+| Cloud Hypervisor | NixOS guests only | Lightweight alternative |
+| crosvm | NixOS guests only | Lightweight alternative |
+| kvmtool | NixOS guests only | Lightweight alternative |
+| Firecracker | NixOS guests only | Lightweight; incompatible with virtiofs/9p |
+
+#### Windows Guests
+
+Windows guests use a "Bring Your Own ISO" approach:
+
+1. In Settings, add a custom distro with your Windows ISO URL and set Guest OS to "Windows".
+2. Create a new VM and select your Windows distro.
+3. The VM is provisioned with a blank disk and your ISO attached as CDROM.
+4. Start the VM and install Windows via the VNC console.
+
+By default Windows VMs use IDE disk and e1000 networking, so they install with no driver disk at all. Windows 10 and Server 2016+ work as-is.
+
+**Windows 11 needs UEFI and TPM 2.0**, and Setup refuses with "This PC can't run Windows 11" when either is missing. Enable both on the host:
+
+\`\`\`nix
+services.weaver.uefi = {
+  enable = true;                  # OVMF firmware; also turns on the emulated TPM 2.0
+  secureBootCapable = false;      # true = OVMF with Microsoft's keys pre-enrolled
+};
+\`\`\`
+
+Then set **Boot firmware** to UEFI when creating the VM. Weaver gives each VM its own writable OVMF variable store, so their boot entries and Secure Boot enrolments stay separate. Requesting UEFI on a host that has not enabled it fails at creation with a message naming the fix — it never falls back to BIOS, because a Windows 11 install on BIOS fails deep inside Setup where the cause is unrecognisable.
+
+**For 3-5x faster disk and network**, point \`services.weaver.uefi.virtioWinIso\` at a virtio-win ISO and turn on **VirtIO drivers** when creating the VM. Weaver attaches it as a second CD-ROM; during Setup, use *Load driver* and pick it from that disc before the installer can see the disk. Weaver never switches a Windows guest to VirtIO without attaching the ISO — that combination boots Setup to "we couldn't find any drives". The ISO is not downloaded for you: it is Red Hat redistributable material with its own terms, so fetching it is your decision.
+
+#### Image Management
+
+Admins can manage distributions in Settings under "Distributions & Image URLs":
+
+- **Check URLs** — Verify that all distribution image URLs are reachable.
+- **Refresh Catalog** — Re-fetch the curated distro catalog from the bundled default or a remote URL.
+- **Edit URLs** — Override the default image URL for any built-in distribution.
+- **Add Custom Distributions** — Add new distros with remote URLs (\`https://...\`) or local file paths (\`file:///path/to/image.qcow2\`).
+
+---
+
+## Tags & Organization
+
+*Available: v1.0+*
+
+Tags help organize workloads by purpose, environment, team, or any other classification.
+
+### Preset Tags
+
+Admins can manage a global list of preset tags in Settings under "Tag Management". Preset tags are available as quick-select options when tagging workloads.
+
+### Applying Tags
+
+Edit tags on individual workloads from the VM detail page. Tags appear as badges on VM cards and can be used to filter the workload list.
+
+### Bulk Tag Management
+
+In Settings, the Tag Management section shows all tags in use with VM counts. Admins can:
+
+- **Rename** a tag across all VMs in bulk.
+- **Delete** a tag from all VMs in bulk.
+
+---
+
+## Audit Log
+
+*Available: v1.0+ (recording), Fabrick (UI viewer)*
+
+Weaver records significant user actions in an audit log. All tiers record audit events to \`audit-log.json\` in the data directory.
+
+### What Is Logged
+
+- Authentication events (login, logout, failed login attempts)
+- VM operations (start, stop, restart, create, delete)
+- AI agent invocations
+- User management actions (create, delete, role change)
+- Distribution management (add, delete, catalog refresh)
+- Configuration changes
+
+Each entry captures: timestamp, username, action, resource (if applicable), success/failure status, and IP address.
+
+### Viewing the Audit Log (Fabrick)
+
+On Fabrick tier, admins and operators can browse the audit log on the Audit Log page (sidebar: "Audit Log"). The page provides:
+
+- **Filters** — Date range (from/until), action type, user ID, and resource name.
+- **Paginated table** — Columns: Timestamp, User, Action (color-coded badge), Resource, Status (success/fail icon), IP.
+- **Navigation** — Page controls at the bottom with entry count.
+
+### Retention
+
+Audit entries are stored in \`audit-log.json\` in the data directory. Back up this file as part of your regular backup procedure (see [Backup & Restore](#backup--restore)).
+
+> **Note:** At v3.0+, the audit log transitions to a SQL backend with a full query UI and fleet-wide audit aggregation.
+
+---
+
+## Notifications
+
+*Available: v1.0+ (in-app), Weaver Solo+ (push channels)*
+
+### In-App Notifications
+
+The bell icon in the toolbar shows unread notification count. Click to open the notification panel where you can mark individual notifications as read, dismiss them, or use checkboxes for bulk actions (mark read, delete). "Mark all read" clears the badge count; "Clear all" removes all notifications.
+
+### Push Notification Channels (Weaver Solo+)
+
+Admins can configure push notification channels in Settings under "Notifications":
+
+1. Click "Add Channel" to create a new channel.
+2. Select the channel type:
+   - **ntfy** — Push to any ntfy server or ntfy.sh.
+   - **Email (SMTP)** — Send notifications via your mail server.
+   - **Webhook** — HTTP POST with support for JSON, Slack, Discord, and PagerDuty payload formats.
+   - **Web Push** — Browser push notifications.
+3. Select which events the channel should receive.
+4. Click "Add Channel" to save, then use the "Test" button to verify delivery.
+
+### Notification Events
+
+Events are grouped into four categories:
+
+| Category | Events |
+|----------|--------|
+| VM events | started, stopped, failed, recovered |
+| Provisioning | provisioned, provision-failed |
+| Resource alerts | high CPU, high memory |
+| Security | auth failure, unauthorized access, permission denied |
+
+Session lifecycle events (login kick, logout) do not trigger security notifications. Each channel can subscribe to any combination of events.
+
+---
+
+## Organization Settings
+
+*Available: v1.0+*
+
+Admins on Weaver Solo/Team and above can customize instance identity in Settings under "Identity":
+
+- **Organization Name** — Appears in the browser tab, header, and login page.
+- **Logo URL** — URL or data URI for your logo, shown in the header and login page. A preview is displayed as you type.
+- **Contact Email** — Displayed on the Help page in a contact banner visible to all users.
+- **Contact Phone** — Displayed on the Help page alongside the contact email.
+
+Click "Save Identity" to apply changes.
+
+---
+
+## Security Administration
+
+*Available: v1.0+*
+
+### Rate Limiting
+
+The backend enforces rate limits automatically with no configuration needed:
+
+| Endpoint | Limit | Window |
+|----------|-------|--------|
+| Auth routes (login, register, refresh) | 10 requests | 1 minute |
+| VM mutations (start, stop, restart, create, delete) | 30 requests | 1 minute |
+| AI agent | 5/10/30 per tier | 1 minute |
+| All other endpoints | 120 requests | 1 minute |
+
+Rate limits are keyed by authenticated user ID or by IP for unauthenticated requests.
+
+### Account Lockout
+
+After 5 failed login attempts within 15 minutes, the account is temporarily locked. Lockout state is persisted to \`lockout.json\` in the data directory and survives server restarts. Expired entries are pruned on startup. No configuration is needed.
+
+### Session Management
+
+- Access tokens expire after 15 minutes and are refreshed automatically. Refresh tokens expire after 7 days of inactivity.
+- Single-session enforcement is active — logging in from a new browser or TUI revokes the previous session. Only one active session per user is allowed.
+- Weaver Solo+/Fabrick tiers default to SQLite sessions (persistent across restarts). Free tier uses in-memory sessions. Override with \`SESSION_STORE_TYPE\` if needed.
+
+### CSP Headers
+
+The backend sets a Content Security Policy via Helmet. If you add external resources (CDN fonts, analytics), update the CSP directives in the backend configuration. The \`upgrade-insecure-requests\` directive is disabled at the app level — configure it at the reverse proxy if needed.
+
+### Password Requirements
+
+All passwords must be 14-128 characters with at least one uppercase letter, one lowercase letter, one digit, and one special character. Passwords must not contain the account's username (case-insensitive).
+
+### Password Reset
+
+If the only admin has lost their password and has root access on the host:
+
+\`\`\`bash
+sudo weaver-reset-password
+\`\`\`
+
+This prompts for a username and new password, updates the password hash directly, and clears any lockout state.
+
+For the full security checklist, see [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md) § Security Checklist.
+
+---
+
+## Backup & Restore
+
+*Available: v1.0+*
+
+All persistent state lives in the data directory (\`/var/lib/weaver\` on NixOS, or the path set by \`VM_DATA_DIR\`).
+
+### What to Back Up
+
+| File | Description | Critical? |
+|------|------------|-----------|
+| \`users.json\` | User accounts, bcrypt password hashes, roles | Yes |
+| \`audit-log.json\` | Audit trail of all user actions | Yes |
+| \`vms.json\` | VM registry and metadata | Yes |
+| \`network-config.json\` | Network configuration | Yes |
+| \`custom-distros.json\` | User-defined distribution templates | Yes |
+| \`sessions.db\` + WAL/SHM | SQLite session store (weaver+ tiers) | No (users re-auth) |
+| \`distro-catalog.json\` | Cached curated distro catalog | No (auto-refreshed) |
+| \`lockout.json\` | Account lockout state | No (auto-pruned) |
+
+For backup scripts, automated backup with cron/systemd timers, and restore procedures, see [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md) § Backup and Restore.
+
+---
+
+## Monitoring & Health
+
+*Available: v1.0+*
+
+### Health Endpoint
+
+\`GET /api/health\` is public (no authentication required) and returns:
+
+\`\`\`json
+{
+  "status": "healthy",
+  "timestamp": "2026-02-12T12:00:00.000Z",
+  "service": "weaver",
+  "tier": "weaver",
+  "tierExpiry": "2027-01-15T00:00:00.000Z",
+  "tierGraceMode": false
+}
+\`\`\`
+
+Use this for uptime monitoring, load balancer health checks, and alerting:
+
+\`\`\`bash
+curl -sf http://localhost:3100/api/health > /dev/null || echo "Weaver is down"
+\`\`\`
+
+### Host Information (Weaver Solo+ Admin)
+
+Weaver Solo/Team admins can view detailed host metrics in Settings under "Host Information":
+
+- NixOS version
+- CPU topology (sockets, cores, threads, cache hierarchy, virtualization type)
+- Disk usage per mount point with capacity warnings
+- Network interfaces with state and MAC address
+- Live metrics: free RAM, load averages (1m, 5m, 15m)
+
+### Log Locations
+
+Weaver logs to the systemd journal with structured JSON output in production.
+
+\`\`\`bash
+# Live log stream
+sudo journalctl -u weaver -f
+
+# Last 100 lines
+sudo journalctl -u weaver -n 100
+
+# Errors only
+sudo journalctl -u weaver -p err
+\`\`\`
+
+Set \`LOG_LEVEL\` to control verbosity: \`fatal\`, \`error\`, \`warn\`, \`info\` (default/recommended), \`debug\`, \`trace\`.
+
+### What to Monitor
+
+- Health endpoint availability and response time
+- Service status: \`systemctl is-active weaver\`
+- Disk usage on the data directory (especially if running many VMs)
+- Journal error rate: \`journalctl -u weaver -p err --since "1 hour ago" | wc -l\`
+- WebSocket connectivity (client-side reconnection events)
+
+### System Health Checks (Doctor)
+
+Settings → Host Information runs a pre-flight doctor that checks KVM, IOMMU, RAM, disk, and kernel modules. Warnings include remediation steps.
+
+**IOMMU — "Not detected (device passthrough unavailable)"**
+
+Required for GPU passthrough (VFIO-PCI). If you see this warning:
+
+1. Enable VT-d (Intel) or AMD-Vi (AMD) in your BIOS/UEFI firmware settings.
+2. Add the kernel parameter to your NixOS configuration:
+   \`\`\`nix
+   boot.kernelParams = [ "intel_iommu=on" ];  # Intel
+   # or
+   boot.kernelParams = [ "amd_iommu=on" ];    # AMD
+   \`\`\`
+3. Apply the config: \`sudo nixos-rebuild switch\`
+4. **Reboot** — kernel parameters do not take effect until the system restarts. \`nixos-rebuild switch\` alone is not sufficient.
+5. After reboot, return to Settings → Host Information. The check should show **IOMMU: Active (N groups)**.
+
+IOMMU is not required for standard VM provisioning — only for GPU passthrough workloads.
+
+For full monitoring guidance, see [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md) § Monitoring.
+
+---
+
+## Upgrade Procedures
+
+*Available: v1.0+*
+
+Full upgrade runbook: **[UPGRADE.md](UPGRADE.md)** — covers three paths (flake+NUR, flake+direct-input, traditional-channels+NUR), pre-upgrade checklist, 8-point verification, rollback via NixOS generations, and per-version notes.
+
+**Short form** for the common cases. **Always back up first**:
+
+\`\`\`bash
+sudo tar -czf /root/weaver-backup-$(date +%Y%m%d-%H%M%S).tar.gz /var/lib/weaver
+\`\`\`
+
+**Flake + NUR:**
+\`\`\`bash
+cd /etc/nixos
+sudo nix flake update nur
+sudo nixos-rebuild switch
+\`\`\`
+
+**Flake + direct input (air-gapped or pinned-release installs):**
+
+Edit \`flake.nix\` to point at the new release tag:
+\`\`\`nix
+inputs.weaver.url = "github:whizbangdevelopers-org/Weaver-Free/v1.0.4";
+\`\`\`
+Then apply:
+\`\`\`bash
+cd /etc/nixos
+sudo nix flake update weaver   # re-resolves the pinned tag
+sudo nixos-rebuild switch
+\`\`\`
+On air-gapped hosts, fetch the tarball on a connected machine first, transfer it, and use an absolute \`path:\` input or a local mirror URL instead of the GitHub reference.
+
+**Traditional channels + NUR (unpinned mainline):**
+\`\`\`bash
+sudo nix-channel --update
+sudo nixos-rebuild switch
+\`\`\`
+
+**Verify new version rendered:**
+\`\`\`bash
+systemctl status weaver.service
+curl -s http://localhost:3100/api/health | jq .version
+\`\`\`
+
+See [Backup & Restore](#backup--restore) for the data-dir layout, and [UPGRADE.md § Verification Checklist](UPGRADE.md#verification-checklist) for the full post-upgrade smoke test.
+
+### Validating Upgrades in a Staging VM (Recommended for Production)
+
+*Available: v1.0+*
+
+For mission-critical Weaver deployments, test the upgrade on a disposable staging VM before running it against production. This catches environment-specific regressions that the project's own CI cannot (your NixOS module config, your data shape, your workload inventory).
+
+**Recommended setup: two staging VMs, one per installation paradigm**
+
+The reason for two is that Weaver supports both flake-based and traditional-channels NixOS, and regressions can show up in one path while the other is fine. Mirror whichever paradigm production uses; keep the other as insurance for when you eventually migrate.
+
+| Staging VM | Mirrors | Refreshed |
+|---|---|---|
+| \`weaver-staging-flake\` | Flake + NUR (Path A) or flake + direct input (Path B) | On every Weaver release |
+| \`weaver-staging-channels\` | Traditional channels + NUR (Path C) | On every Weaver release |
+
+**Minimum specs per VM:** 4 GB RAM, 2 vCPU, 20 GB disk. These run Weaver itself plus a handful of sample workloads — not the production workload fleet.
+
+**Example \`configuration.nix\` — flake variant (excerpt):**
+
+\`\`\`nix
+# Inside flake.nix \`nixosConfigurations.weaver-staging-flake\`
+{
+  imports = [
+    (nur-packages + "/modules/weaver-free")
+    ./hardware-configuration.nix
+  ];
+  services.weaver.enable = true;
+  services.weaver.dataDir = "/var/lib/weaver";
+  # Mirror production: same JWT secret source, same network config
+}
+\`\`\`
+
+**Example \`configuration.nix\` — traditional-channels variant (excerpt):**
+
+\`\`\`nix
+# /etc/nixos/configuration.nix (no flake)
+{ config, pkgs, ... }: {
+  imports = [ ./hardware-configuration.nix ];
+  nixpkgs.config.packageOverrides = pkgs: {
+    nur = import (builtins.fetchTarball
+      "https://github.com/nix-community/NUR/archive/main.tar.gz"
+    ) { inherit pkgs; };
+  };
+  environment.systemPackages = [ pkgs.nur.repos.whizbangdevelopers.weaver ];
+  # Or use the module if shipped: imports = [ pkgs.nur.repos.whizbangdevelopers.weaver ];
+}
+\`\`\`
+
+**Upgrade-validation workflow (per release):**
+
+1. On each staging VM, confirm current version matches production (or the version you're upgrading *from*).
+2. Take a data-dir backup on each.
+3. Run the upgrade (Path A/B/C as appropriate) on each staging VM.
+4. Walk the full [UPGRADE.md § Verification Checklist](UPGRADE.md#verification-checklist) on each.
+5. If both pass: proceed with production upgrade.
+6. If either fails: file a bug against Weaver with the \`journalctl -u weaver.service\` output and your \`configuration.nix\` (redacted). Hold production at N-1 until resolved.
+
+Budget ~30 min for the two-VM validation per release. That's the cost of confidence.
+
+---
+
+## Removing Weaver
+
+The inverse of upgrade — for decommissioning a host, migrating to a different machine, or wiping an evaluation environment. Full procedure including dry-run, data-preservation, and manual fallback is in [UNINSTALL.md](UNINSTALL.md). Short version for administrators:
+
+\`\`\`sh
+sudo ./scripts/nix-uninstall.sh           # scripted — both flake + channels paths
+sudo ./scripts/nix-uninstall.sh --dry-run # preview what would change; no edits
+sudo ./scripts/nix-uninstall.sh --keep-data  # preserve /var/lib/weaver (DB, users, audit log)
+\`\`\`
+
+The script is **non-destructive until you confirm** — phase 1 scans, phase 2 prints the plan, phase 3 asks \`Continue? [y/N]\`, and only then phase 4 edits config and wipes data. Phase 5 verifies the result.
+
+**What the script handles uniformly:**
+
+- Stops \`weaver.service\`
+- Stops every running \`microvm@*\` service
+- Classifies your \`.nix\` config files: *weaver-only* (deleted whole) vs *weaver-shared* (line-edited in place)
+- Removes \`weaver\` from \`flake.nix\` inputs, outputs params, and modules list
+- Regenerates \`flake.lock\`
+- Runs \`sudo nixos-rebuild switch --flake $NIXOS_FLAKE#$NIXOS_HOST\`
+- Optionally wipes \`/var/lib/weaver\` (default: wipe; \`--keep-data\` preserves)
+
+**Environment overrides** for non-standard config paths:
+
+\`\`\`sh
+sudo NIXOS_FLAKE=/srv/nixos-config NIXOS_HOST=weaverlab WEAVER_DATA_DIR=/mnt/weaver \\
+  ./scripts/nix-uninstall.sh
+\`\`\`
+
+**Before-you-uninstall checklist:**
+
+1. Back up \`/var/lib/weaver/\` to a tarball — the ultimate safety net, regardless of \`--keep-data\`. One command: \`sudo tar -czf /root/weaver-backup-$(date +%Y%m%d-%H%M%S).tar.gz /var/lib/weaver\`
+2. Note running MicroVMs: \`systemctl list-units --type=service --state=running | grep microvm@\`. If any have uncommitted state you care about, dump/pause them first — the script will stop all of them.
+3. If the same \`.nix\` file holds Weaver plus unrelated modules, review the plan carefully before confirming. Line-level removal is usually clean but syntax in complex shared files can surprise \`sed\`.
+
+**Reinstall gotcha:** after uninstall, if you later reinstall Weaver on the same host, the \`br-microvm-netdev.service\` and \`network-addresses-br-microvm.service\` units may not auto-start — \`WantedBy=network.target\` is only honored at boot. Run \`sudo systemctl start br-microvm-netdev.service network-addresses-br-microvm.service\` or reboot.
+
+If you're trying to move to a newer Weaver version, **uninstall/reinstall is the wrong path** — use [UPGRADE.md](UPGRADE.md) for in-place upgrades that preserve all data and audit history.
+
+---
+
+## Extensions
+
+*Available: v1.1+*
+
+Extensions expand Weaver's capabilities beyond the core workload management features. All extensions are tier-gated — they require at minimum a Weaver Solo license. There is no a la carte extension purchasing; extensions are included with the appropriate tier.
+
+### Extension Categories
+
+| Category | Version | Description |
+|----------|---------|-------------|
+| **Containers** | v1.1+ | Docker, Podman, and Apptainer workload visibility and management |
+| **Auth Extensions** | v1.1+ | SSO (SAML/OIDC) and FIDO2/WebAuthn authentication |
+| **DNS Management** | v1.1+ | Internal DNS for workload service discovery |
+| **Firewall & TLS** | v1.2+ | Managed nftables profiles and TLS certificate management |
+| **Hardening** | v1.2+ | Security hardening profiles for workloads |
+| **GPU Inventory** | v1.2+ | GPU detection, assignment, and monitoring |
+| **AI Credential Vault** | v1.4+ | Centralized admin-managed AI provider keys |
+| **Secrets Management** | v1.5+ | Encrypted secret injection into workloads |
+| **Templates** | v2.0+ | Workload templates and disk management |
+| **Compliance Export** | v2.2+ | Framework-based compliance report generation |
+
+### TOTP / Multi-Factor Authentication
+
+TOTP is included in Weaver Solo/Team at no additional cost. Free tier does not have MFA. Users with 1Password Technical Accounts at the Weaver tier get TOTP free via OAuth.
+
+---
+
+## Weaver Team Administration
+
+*Available: v2.2+*
+
+Weaver Team adds multi-host awareness through peer monitoring — read-only visibility into up to 2 other Weaver hosts without requiring a full Fabrick fleet.
+
+### Peer Registration
+
+Register remote Weaver instances as peers to monitor their workload health and status from your dashboard. Peers are discovered via Tailscale or manual URL entry.
+
+### Tailscale Discovery
+
+When running on a Tailscale network, Weaver can automatically discover other Weaver instances on the tailnet. Discovered peers appear as candidates for registration.
+
+### Limitations
+
+- Maximum of 2 peers per Weaver Team instance.
+- Peer access is read-only — you can view remote workload status but cannot start, stop, or modify remote workloads.
+- For full remote workload management, upgrade to Fabrick.
+
+---
+
+## Fabrick Administration
+
+*Available: v2.3+*
+
+Fabrick is the multi-host fleet control plane. Each host runs Weaver; Fabrick orchestrates the fleet.
+
+### Fleet Overview
+
+The Fabrick page provides an aggregate view of all enrolled hosts showing health status, workload counts, resource utilization, and host kind (on-prem, cloud, remote, IoT). Click a host card to drill into that host's workloads.
+
+### Host Enrollment
+
+Enroll hosts into the fleet by deploying Weaver with a Fabrick-tier license key on each host. Hosts register with the fleet control plane and appear on the Fabrick overview page.
+
+### Warp Patterns (v2.5+)
+
+Warp is the desired-state management surface. A warp pattern defines what a host type should look like: which workloads, which bridges, which GPU assignment, which snapshot policy. Warp detects configuration drift and supports blue/green pattern deployment.
+
+### Fleet Virtual Bridges (v3.0+)
+
+Fleet virtual bridges span multiple hosts using overlay transport (VXLAN for datacenter, WireGuard for edge). They replace the need for separate CNI plugins, ingress controllers, and deployment tools. Each fleet bridge maps 1:1 to a workload group — the compliance boundary IS the network isolation boundary.
+
+### Workload Groups (v3.3+)
+
+Compliance boundaries that scope workloads, users, and AI policy. Each group can have compliance framework tags (HIPAA, PCI-DSS, CMMC), an AI policy (allow-all, claude-only, local-only, none), and IdP/LDAP group mapping. Creating a group automatically creates its fleet bridge.
+
+---
+
+## TUI Administration
+
+*Available: v1.0+*
+
+Weaver includes a terminal-based interface (TUI) for managing workloads over SSH without a browser.
+
+### Connecting
+
+\`\`\`bash
+# Connect to a running Weaver instance
+npm run start:tui -- --host http://your-host:3100
+
+# Demo mode (offline, mock data)
+npm run start:tui -- --demo
+\`\`\`
+
+> **Note:** Complete the initial admin setup via the web UI before using the TUI. The TUI requires an existing account to authenticate.
+
+### Credentials
+
+TUI credentials are stored in \`~/.config/weaver/\`. The TUI uses the same JWT authentication as the web UI, and single-session enforcement applies — logging in via the TUI revokes any existing web session for that user.
+
+### Tier Display
+
+The TUI displays the current license tier in the status bar. Tier-gated features are enforced at the backend — the TUI respects the same restrictions as the web UI.
+
+### JSON Export
+
+Export workload data as JSON for scripting and automation:
+
+\`\`\`bash
+npm run start:tui -- --export
+\`\`\`
+
+### Keyboard Navigation
+
+| Key | Action |
+|-----|--------|
+| Arrows / j / k | Navigate workload list |
+| s | Start selected workload |
+| S | Stop selected workload |
+| r | Restart selected workload |
+| d | Open workload detail |
+| a | Invoke AI agent |
+| q | Quit |
+
+---
+
+## NUR Registry Maintenance
+
+Weaver Free is published to the [Nix User Repository](https://github.com/nix-community/NUR)
+so NixOS users can install it via \`pkgs.nur.repos.whizbangdevelopers-org.weaver-free\`.
+
+Package updates are **fully automatic** — \`build.yml\` fires the NUR update webhook
+after every successful build. No manual intervention is needed for routine releases.
+
+The one-time registration PR (adding \`whizbangdevelopers-org\` to \`nix-community/NUR:repos.json\`)
+and its maintenance procedure — including rebase steps and troubleshooting — are documented in:
+
+**\`docs/operations/NUR-PUBLISHING.md\`** — an internal maintainer runbook, kept in Weaver-Dev
+rather than published, since NUR registration is performed by whizBANG Developers only.
+`;export{e as default};

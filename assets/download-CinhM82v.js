@@ -1,0 +1,1 @@
+function e(e,t){let n=URL.createObjectURL(e),r=document.createElement(`a`);r.href=n,r.download=t,r.click(),setTimeout(()=>URL.revokeObjectURL(n),0)}function t(t,n,r=`application/json`){e(new Blob([t],{type:`${r};charset=utf-8`}),n)}function n(e=new Date){return e.toISOString().slice(0,10)}export{e as n,t as r,n as t};

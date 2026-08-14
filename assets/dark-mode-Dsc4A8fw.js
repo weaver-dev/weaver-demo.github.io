@@ -1,0 +1,1 @@
+import{r as e}from"./network-graph-60mnEywm.js";import{t}from"./Dark-DSE4HsYv.js";import{Y as n}from"./index-YlWEOkPu.js";var r=e(()=>{let e=n();t.set(e.darkMode===`auto`?`auto`:e.darkMode===`dark`)});export{r as default};

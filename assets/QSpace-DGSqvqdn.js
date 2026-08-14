@@ -1,0 +1,1 @@
+import{T as e}from"./network-graph-60mnEywm.js";import{t}from"./create-CIF7aZAT.js";var n=t({name:`QSpace`,setup(){let t=e(`div`,{class:`q-space`});return()=>t}});export{n as t};
